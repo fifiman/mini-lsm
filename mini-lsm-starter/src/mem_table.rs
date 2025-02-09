@@ -15,7 +15,7 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::ops::Bound;
+use std::ops::{Bound, RangeBounds};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -122,8 +122,19 @@ impl MemTable {
     }
 
     /// Get an iterator over a range of keys.
-    pub fn scan(&self, _lower: Bound<&[u8]>, _upper: Bound<&[u8]>) -> MemTableIterator {
-        unimplemented!()
+    pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> MemTableIterator {
+        let (lower, upper) = (map_bound(lower), map_bound(upper));
+
+        let mut iter: MemTableIterator = MemTableIteratorBuilder {
+            map: self.map.clone(),
+            iter_builder: |map| map.range((lower, upper)),
+            item: (Bytes::new(), Bytes::new()),
+        }
+        .build();
+
+        let _ = iter.next();
+
+        iter
     }
 
     /// Flush the mem-table to SSTable. Implement in week 1 day 6.
@@ -162,6 +173,7 @@ pub struct MemTableIterator {
     #[not_covariant]
     iter: SkipMapRangeIter<'this>,
     /// Stores the current key-value pair.
+    /// TODO: This could be much better represented than a pair of key value
     item: (Bytes, Bytes),
 }
 
@@ -169,18 +181,23 @@ impl StorageIterator for MemTableIterator {
     type KeyType<'a> = KeySlice<'a>;
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        &self.borrow_item().1[..]
     }
 
     fn key(&self) -> KeySlice {
-        unimplemented!()
+        KeySlice::from_slice(&self.borrow_item().0[..])
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        !self.borrow_item().0.is_empty()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        let new_item = self.with_iter_mut(|iter| match iter.next() {
+            None => (Bytes::from_static(&[]), Bytes::from_static(&[])),
+            Some(entry) => (entry.key().clone(), entry.value().clone()),
+        });
+        self.with_mut(|iter| *iter.item = new_item);
+        Ok(())
     }
 }
