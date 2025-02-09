@@ -294,15 +294,29 @@ impl LsmStorageInner {
         compaction_filters.push(compaction_filter);
     }
 
+    pub fn get_value_from_memtable(memtable: &MemTable, key: &[u8]) -> Option<Option<Bytes>> {
+        memtable
+            .get(key)
+            .map(|v| if v.is_empty() { None } else { Some(v) })
+    }
+
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
-    pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
-        if let Some(active_memtable_lookup) = self.state.read().memtable.get(_key) {
-            if active_memtable_lookup.is_empty() {
-                return Ok(None);
-            } else {
-                return Ok(Some(active_memtable_lookup));
-            }
+    pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+        let state = self.state.read();
+
+        if let Some(active_memtable_lookup) = Self::get_value_from_memtable(&state.memtable, key) {
+            return Ok(active_memtable_lookup);
         }
+
+        if let Some(immutable_memtable_lookup) = state
+            .imm_memtables
+            .iter()
+            .find_map(|memtable| Self::get_value_from_memtable(memtable, key))
+        {
+            return Ok(immutable_memtable_lookup);
+        }
+
+        drop(state);
 
         Ok(None)
     }
