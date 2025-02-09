@@ -32,6 +32,7 @@ use crate::compact::{
     CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
+use crate::iterators::merge_iterator::MergeIterator;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
@@ -410,9 +411,42 @@ impl LsmStorageInner {
     /// Create an iterator over a range of keys.
     pub fn scan(
         &self,
-        _lower: Bound<&[u8]>,
-        _upper: Bound<&[u8]>,
+        lower: Bound<&[u8]>,
+        upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        unimplemented!()
+        // pub struct LsmStorageState {
+        //     /// The current memtable.
+        //     pub memtable: Arc<MemTable>,
+        //     /// Immutable memtables, from latest to earliest.
+        //     pub imm_memtables: Vec<Arc<MemTable>>,
+        //     /// L0 SSTs, from latest to earliest.
+        //     pub l0_sstables: Vec<usize>,
+        //     /// SsTables sorted by key range; L1 - L_max for leveled compaction, or tiers for tiered
+        //     /// compaction.
+        //     pub levels: Vec<(usize, Vec<usize>)>,
+        //     /// SST objects.
+        //     pub sstables: HashMap<usize, Arc<SsTable>>,
+        // }
+
+        let snapshot = {
+            let guard = self.state.read();
+            Arc::clone(&guard)
+        }; // drop global lock here
+
+        let mut all_scans = Vec::new();
+
+        // Active memtable
+        all_scans.push(Box::new(snapshot.memtable.scan(lower, upper)));
+
+        // Immutable memtables
+        all_scans.extend(
+            snapshot
+                .imm_memtables
+                .iter()
+                .map(|m| Box::new(m.scan(lower, upper))),
+        );
+
+        let iter = LsmIterator::new(MergeIterator::create(all_scans))?;
+        Ok(FusedIterator::new(iter))
     }
 }
