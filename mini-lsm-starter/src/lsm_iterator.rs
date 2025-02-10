@@ -33,14 +33,14 @@ pub struct LsmIterator {
 
 impl LsmIterator {
     pub(crate) fn new(iter: LsmIteratorInner) -> Result<Self> {
-        Ok(Self { inner: iter })
+        let mut s = Self { inner: iter };
+        Self::move_to_non_delete(&mut s)?;
+        Ok(s)
     }
-
-    // CR nbauk: Check bounds as well
 
     fn move_to_non_delete(&mut self) -> Result<()> {
         while self.is_valid() && self.inner.value().is_empty() {
-            self.next_inner()?;
+            self.inner.next()?;
         }
         Ok(())
     }
@@ -58,13 +58,13 @@ impl StorageIterator for LsmIterator {
     }
 
     fn value(&self) -> &[u8] {
-        self.inner.value()?;
-        self.move_to_non_delete()?;
-        Ok(())
+        self.inner.value()
     }
 
     fn next(&mut self) -> Result<()> {
-        self.inner.next()
+        self.inner.next()?;
+        self.move_to_non_delete()?;
+        Ok(())
     }
 }
 
